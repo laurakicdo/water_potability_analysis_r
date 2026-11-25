@@ -1,0 +1,681 @@
+---
+title: "Water Potability Project"
+author: "Laura Caicedo"
+date: "2026-11-23"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Water Potability Project (Practice)
+
+## Description of the project
+
+In this project, I will perform a data analysis using R on a water potability dataset to practice and showcase my skills. 
+
+**Dataset:** Water quality dataset from Kaggle\
+**License:** CC0: Public Domain\
+**Content:** Contains metrics for 3,276 water bodies\
+**Link:** https://www.kaggle.com/datasets/adityakadiwal/water-potability \
+
+
+**Data detail:**\
+1. ph: pH of water (0 to 14). \
+2. Hardness: Capacity of water to precipitate soap in mg/L. \
+3. Solids: Total dissolved solids in ppm. \
+4. Chloramines: Amount of Chloramines in ppm. \
+5. Sulfate: Amount of Sulfates dissolved in mg/L. \
+6. Conductivity: Electrical conductivity of water in uS/cm. \
+7. Organic_carbon: Amount of organic carbon in ppm. \
+8. Trihalomethanes: Amount of Trihalomethanes in ug/L. \
+9. Turbidity: Measure of light emitting property of water in NTU. \
+10. Potability: Indicates if water is safe for human consumption. Potable = 1 and Not potable = 0 \
+
+
+
+## Load the dataset and packages
+
+```{r Load packages, message = FALSE, warning = FALSE}
+# install.packages("tidyverse")
+# install.packages("skimr")
+# install.packages("corrplot")
+# install.packages("car")
+# install.packages("naniar")
+# install.packages("readr")
+
+library(tidyverse)
+library(skimr)
+library(corrplot)
+library(car)
+library(readr)
+```
+```{r load dataset}
+water_potability <- read_csv("water_potability.csv")
+```
+
+Some initial exploration of the data.\
+
+```{r}
+str(water_potability)
+
+```
+
+
+
+## Data Cleaning
+
+Change the Potability data type from numeric to factor.\
+
+```{r}
+water_potability$Potability <- as.factor(water_potability$Potability)
+```
+
+
+
+### Missing Values
+
+Identify missing values per column.\
+
+```{r}
+colSums(is.na(water_potability))
+```
+```{r}
+colMeans(is.na(water_potability)) * 100
+```
+\
+
+There is a significant number of missing values in the "ph" and "Sulfate" columns.\
+
+Check how many rows are missing both ph and Sulfate.
+
+```{r}
+sum(is.na(water_potability$ph) & is.na(water_potability$Sulfate))
+```
+
+\
+Check if the missing values are correlated to other variables.\
+\
+
+### MCAR Test (Missing Completely at Random).
+Ho: Missing data is completely random.\
+Ha: Missing data is not random.\
+```{r MCAR Test, message=FALSE, warning=FALSE}
+library(naniar)
+library(dplyr)
+
+water_potability %>%
+  select(where(is.numeric)) %>%
+  mcar_test()
+```
+With a p-value of 0.890, we fail to reject the null hypothesis that the data is MCAR.
+\
+
+### MAR Test of ph.
+Ho: Missing ph data is completely random.\
+Ha: Missing ph data is not random.\
+
+```{r MAR Test of ph, message=FALSE, warning=FALSE}
+# Check if missingness in 'ph' is predicted by complete variables
+ph_mar_model <- glm(
+  is.na(ph) ~ Hardness + Solids + Chloramines + Conductivity + 
+              Organic_carbon + Turbidity + Potability,
+  data = water_potability,
+  family = binomial
+)
+
+summary(ph_mar_model)
+```
+All the p-values are > 0.05. Missing data in ph does not depend on any observed variable.\
+
+\
+
+### MAR Test of Sulfate.
+Ho: Missing sulfate data is completely random.\
+Ha: Missing sulfate data is not random.\
+
+```{r MAR Test of Sulfate, message=FALSE, warning=FALSE}
+# Check if missingness in 'Sulfate' is predicted by complete variables
+Sulfate_mar_model <- glm(
+  is.na(Sulfate) ~ Hardness + Solids + Chloramines + Conductivity + 
+              Organic_carbon + Turbidity + Potability,
+  data = water_potability,
+  family = binomial
+)
+
+summary(Sulfate_mar_model)
+```
+All the p-values are > 0.05. Missing data in Sulfate does not depend on any observed variable.\
+
+\
+
+### MAR Test of Trihalomethanes.
+Ho: Missing Trihalomethanes data is completely random.\
+Ha: Missing Trihalomethanes data is not random.\
+
+```{r MAR Test of Trihalomethanes, message=FALSE, warning=FALSE}
+# Check if missingness in 'Trihalomethanes' is predicted by complete variables
+Trihalomethanes_mar_model <- glm(
+  is.na(Trihalomethanes) ~ Hardness + Solids + Chloramines + Conductivity + 
+              Organic_carbon + Turbidity + Potability,
+  data = water_potability,
+  family = binomial
+)
+
+summary(Trihalomethanes_mar_model)
+```
+All the p-values are > 0.05. Missing data in Trihalomethanes does not depend on any observed variable.\
+
+\
+
+## Outliers
+
+Boxplots to check for outliers per column\
+
+```{r Outlier Boxplots, message=FALSE, warning=FALSE}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+water_potability %>%
+  select(where(is.numeric)) %>%
+  pivot_longer(everything(), names_to = "Variable", values_to = "Value") %>%
+  ggplot(aes(x = Variable, y = Value)) +
+  geom_boxplot(fill = "skyblue", outlier.color = "red", outlier.alpha = 0.6) +
+  facet_wrap(~ Variable, scales = "free") +
+  theme_minimal() +
+  labs(title = "Boxplots of Water Quality Variables (Before Imputation)", x = NULL, y = NULL)
+```
+\
+\
+Outliers count using the IQR Rule: \
+
+```{r Outlier IQR Rule, message=FALSE, warning=FALSE}
+library(dplyr)
+library(tidyr)
+
+iqr_summary <- water_potability %>%
+  select(where(is.numeric)) %>%
+  pivot_longer(everything(), names_to = "Variable", values_to = "Value") %>%
+  group_by(Variable) %>%
+  summarise(
+    Min = min(Value, na.rm = TRUE),
+    Q1 = quantile(Value, 0.25, na.rm = TRUE),
+    Median = median(Value, na.rm = TRUE),
+    Q3 = quantile(Value, 0.75, na.rm = TRUE),
+    Max = max(Value, na.rm = TRUE),
+    Negative_Count = sum(Value < 0, na.rm = TRUE),
+    IQR = Q3 - Q1,
+    Lower_Bound = Q1 - 1.5 * IQR,
+    Upper_Bound = Q3 + 1.5 * IQR,
+    Outlier_Count = sum(Value < Lower_Bound | Value > Upper_Bound, na.rm = TRUE),
+    Outlier_Pct = round(Outlier_Count / sum(!is.na(Value)) * 100, 2)
+  )
+
+print(iqr_summary, width = Inf)
+
+
+```
+\
+From the IQR results table, we can see that outliers do not represent a significant proportion of the data. Each variable has between 11 outliers (Conductivity, ~0.3%) and 83 outliers (Hardness, ~2.5%). None of the variables contain negative numbers, and their minimum and maximum values fall within reasonable ranges. The only variable to keep an eye on is Solids, which has some notably high values. \
+
+I will not eliminate these outliers because there is no reason to believe these readings are errors; rather, they likely indicate poor water quality. \
+\
+
+### Replacing the missing data with the  median
+
+Create a new dataset in which missing values are replaced with each column's median.\
+
+```{r Replace missing data, message=FALSE, warning=FALSE}
+library(dplyr)
+
+# Create a new dataset with median-imputed values
+water_potability1 <- water_potability %>%
+  mutate(across(where(is.numeric), ~ ifelse(is.na(.), median(., na.rm = TRUE), .)))
+
+# Verify 0 missing values remain in the new dataset
+colSums(is.na(water_potability1))
+
+
+```
+\
+\
+
+
+
+## Exploratory Data Analysis (EDA)
+
+
+### Target variable distribution
+
+```{r Target variable distribution, message=FALSE, warning=FALSE}
+library(dplyr)
+library(ggplot2)
+
+water_potability1 %>%
+  count(Potability) %>%
+  mutate(
+    Percentage = round(n / sum(n) * 100, 1),
+    Label = paste0(n, " (", Percentage, "%)")
+  ) %>%
+  ggplot(aes(x = Potability, y = n, fill = Potability)) +
+  geom_col(width = 0.6, show.legend = FALSE) +
+  geom_text(aes(label = Label), vjust = -0.5, size = 4.5, fontface = "bold") +
+  scale_x_discrete(labels = c("0" = "Not Potable (0)", "1" = "Potable (1)")) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.12))) +
+  scale_fill_manual(values = c("0" = "#E07A5F", "1" = "#3D85C6")) +
+  theme_minimal() +
+  labs(
+    title = "Distribution of Water Potability",
+    subtitle = "Target Variable Class Balance (n = 3,276)",
+    x = NULL,
+    y = "Number of Samples"
+  )
+
+```
+
+
+
+### Visual comparison of the parameters by potability
+
+\
+**Density plot**
+
+```{r Density plot, message=FALSE, warning=FALSE}
+water_potability1 %>%
+  pivot_longer(cols = -Potability, names_to = "Variable", values_to = "Value") %>%
+  ggplot(aes(x = Value, fill = Potability, color = Potability)) +
+  geom_density(alpha = 0.35, linewidth = 0.8) +
+  facet_wrap(~ Variable, scales = "free") +
+  scale_fill_manual(values = c("0" = "#E07A5F", "1" = "#3D85C6"),
+                    labels = c("0" = "Not Potable (0)", "1" = "Potable (1)")) +
+  scale_color_manual(values = c("0" = "#E07A5F", "1" = "#3D85C6"),
+                     labels = c("0" = "Not Potable (0)", "1" = "Potable (1)")) +
+  theme_minimal() +
+  labs(
+    title = "Distribution Shapes by Potability",
+    x = NULL,
+    y = "Density",
+    fill = "Potability",
+    color = "Potability"
+  )
+
+```
+
+\
+\
+**Boxplots**
+
+```{r Boxplots parameters, message=FALSE, warning=FALSE}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+water_potability1 %>%
+  pivot_longer(cols = -Potability, names_to = "Variable", values_to = "Value") %>%
+  ggplot(aes(x = Potability, y = Value, fill = Potability)) +
+  geom_boxplot(alpha = 0.75, outlier.alpha = 0.3) +
+  facet_wrap(~ Variable, scales = "free_y") +
+  scale_x_discrete(labels = c("0" = "Not Potable", "1" = "Potable")) +
+  scale_fill_manual(values = c("0" = "#E07A5F", "1" = "#3D85C6"),
+                    labels = c("0" = "Not Potable (0)", "1" = "Potable (1)")) +
+  theme_minimal() +
+  labs(
+    title = "Water Quality Parameters by Potability",
+    x = NULL,
+    y = NULL,
+    fill = "Potability"
+  )
+
+```
+
+\
+\
+**Comparison Table**
+
+```{r}
+comparison_table <- water_potability1 %>%
+  pivot_longer(cols = -Potability, names_to = "Variable", values_to = "Value") %>%
+  group_by(Variable) %>%
+  summarise(
+    Median_0 = round(median(Value[Potability == "0"]), 2),
+    Median_1 = round(median(Value[Potability == "1"]), 2),
+    IQR_0 = round(IQR(Value[Potability == "0"]), 2),
+    IQR_1 = round(IQR(Value[Potability == "1"]), 2),
+    p_value = round(wilcox.test(Value ~ Potability)$p.value, 4)
+  ) %>%
+  arrange(p_value)
+
+print(comparison_table)
+
+```
+
+**Analysis:**\
+The plots and statistical table confirm that no single variable separates potable (1) from non-potable (0) water on its own. 
+In both the boxplots and the summary table, the medians for potable (1) and non-potable (0) water are nearly identical across all variables. \
+\
+
+# Correlation Matrix
+
+Based on the previous results, I will check for multicollinearity among the variables using a correlation matrix.\
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+# Calculate correlation matrix
+cor_matrix <- water_potability1 %>%
+  select(where(is.numeric)) %>%
+  cor(use = "complete.obs", method = "pearson")
+
+# Plot heatmap
+cor_matrix %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column("Var1") %>%
+  pivot_longer(-Var1, names_to = "Var2", values_to = "Correlation") %>%
+  ggplot(aes(x = Var1, y = Var2, fill = Correlation)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = round(Correlation, 2)), size = 3.5) +
+  scale_fill_gradient2(low = "#E07A5F", mid = "white", high = "#3D85C6", 
+                       midpoint = 0, limits = c(-1, 1)) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Correlation Matrix of Water Quality Predictors", x = NULL, y = NULL)
+
+```
+\
+We can see there is no multicollinearity among the predictors.
+\
+
+## Statistical Modeling
+
+### Normality check
+
+```{r Normal Q-Q Plots, message=FALSE, warning=FALSE}
+
+water_potability1 %>%
+  select(where(is.numeric)) %>%
+  pivot_longer(everything(), names_to = "Variable", values_to = "Value") %>%
+  ggplot(aes(sample = Value)) +
+  stat_qq(alpha = 0.3, color = "#3D85C6") +
+  stat_qq_line(color = "#E07A5F", linewidth = 0.8) +
+  facet_wrap(~ Variable, scales = "free") +
+  theme_minimal() +
+  labs(
+    title = "Normal Q-Q Plots of Water Quality Variables",
+    x = "Theoretical Quantiles",
+    y = "Sample Quantiles"
+  )
+
+```
+\
+\
+
+```{r normality_summary, message=FALSE, warning=FALSE}
+# install.packages("e1071")
+library(e1071)
+
+normality_summary <- water_potability1 %>%
+  select(where(is.numeric)) %>%
+  pivot_longer(everything(), names_to = "Variable", values_to = "Value") %>%
+  group_by(Variable) %>%
+  summarise(
+    Skewness = round(skewness(Value), 3),
+    Kurtosis = round(kurtosis(Value), 3),
+    Shapiro_W = round(shapiro.test(Value)$statistic, 4),
+    Shapiro_p = signif(shapiro.test(Value)$p.value, 3)
+  )
+
+print(normality_summary)
+
+```
+
+- Only Organic_carbon and Turbidity follow a normal distribution.\
+- Chloramines, Conductivity, Hardness, and Trihalomethanes have symmetrical distributions (skewness close to 0) that deviate slightly from strict normality.\
+- Solids shows a noticeable positive skew (0.621).\
+- Because of median imputation on ph and Sulfate, both variables exhibit high kurtosis.\
+\
+
+### Homoscedasticity Check
+
+```{r Homoscedasticity, message=FALSE, warning=FALSE}
+
+homoscedasticity_summary <- water_potability1 %>%
+  pivot_longer(cols = -Potability, names_to = "Variable", values_to = "Value") %>%
+  group_by(Variable) %>%
+  summarise(
+    Var_0 = round(var(Value[Potability == "0"]), 2),
+    Var_1 = round(var(Value[Potability == "1"]), 2),
+    Levene_F = round(leveneTest(Value ~ Potability)$`F value`[1], 3),
+    Levene_p = signif(leveneTest(Value ~ Potability)$`Pr(>F)`[1], 3)
+  ) %>%
+  arrange(Levene_p)
+
+print(homoscedasticity_summary)
+
+```
+\
+- Heteroscedastic Variables (p < 0.05) \
+Five variables have significantly unequal variance between Not Potable (0) and Potable (1) water: Sulfate, Hardness, Chloramines, ph, and solids.
+Most of these parameters show higher variance in potable water data, except for ph.
+\
+- Homoscedastic Variables (p > 0.05) \
+Conductivity, Organic_carbon, Trihalomethanes, and Turbidity maintain equal variance across both groups.\
+
+\
+\
+
+## Machine Learning Classification Model
+\
+
+**Model Selection Approach** \
+
+Based on the exploratory and statistical tests, a non-linear machine learning classification approach is the best fit for this problem. Traditional statistical models like Logistic Regression rely on linear relationships and parametric assumptions, which this dataset violates. Earlier tests confirmed that most variables are non-normal, several show unequal variance across potability groups, and individual medians do not differ significantly between potable and non-potable water.\
+
+In real-world water quality assessment, potability depends on multi-variable interactions rather than a single threshold—all chemical parameters must fall within safe ranges simultaneously.\
+
+Tree-based ensemble models like Random Forest and XGBoost are ideal here because they make no assumptions about data distribution, handle outliers naturally, and capture complex, non-linear interactions across multiple variables at once.
+
+### Build Random Forest and XGBoost Models
+
+**1. Split the data**
+
+```{r Data split, message=FALSE, warning=FALSE}
+# install.packages(c("tidymodels", "ranger", "xgboost"))
+library(tidymodels)
+
+set.seed(22)
+
+# Stratified 80/20 train/test split
+data_split <- initial_split(water_potability1, prop = 0.80, strata = Potability)
+train_data <- training(data_split)
+test_data  <- testing(data_split)
+
+# 5-fold stratified cross-validation on training data
+cv_folds <- vfold_cv(train_data, v = 5, strata = Potability)
+
+```
+
+```{r free-memory, message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
+
+rm(list = setdiff(ls(), c("water_potability1", "data_split", "train_data", "test_data", "cv_folds")))
+gc()
+```
+
+
+**2. Define Random Forest and XGBoost Models**
+```{r Define models, message=FALSE, warning=FALSE, eval = FALSE}
+library(tidymodels)
+
+# Define preprocessing recipe 
+water_recipe <- recipe(Potability ~ ., data = train_data)
+
+# Random Forest specification
+rf_spec <- rand_forest(
+  trees = 200,
+  mtry  = tune(),
+  min_n = tune()
+) %>%
+  set_engine("ranger", importance = "impurity", num.threads = 1) %>%
+  set_mode("classification")
+
+# XGBoost specification
+xgb_spec <- boost_tree(
+  trees      = 200,
+  tree_depth = tune(),
+  learn_rate = tune(),
+  min_n      = tune()
+) %>%
+  set_engine("xgboost") %>%
+  set_mode("classification")
+
+# Combine into a single workflow set
+models_wf <- workflow_set(
+  preproc = list(base = water_recipe),
+  models  = list(Random_Forest = rf_spec, XGBoost = xgb_spec)
+)
+
+# Tune both models across a grid of 6 parameter combinations each
+set.seed(22)
+tuning_results <- models_wf %>%
+  workflow_map(
+    resamples = cv_folds,
+    grid      = 6,
+    metrics   = metric_set(roc_auc, accuracy, f_meas),
+    control   = control_grid(event_level = "second", save_pred = FALSE, save_workflow = FALSE)
+  )
+
+# Compare cross-validation performance
+rank_results(tuning_results, rank_metric = "roc_auc", select_best = TRUE)
+autoplot(tuning_results) + theme_minimal()
+```
+
+```{r load-models, echo = FALSE, message = FALSE, warning = FALSE}
+library(tidymodels)
+
+# Load pre-computed model results to stay within session memory limits
+rf_final       <- readRDS("rf_final.rds")
+xgb_final      <- readRDS("xgb_final.rds")
+tuning_results <- readRDS("tuning_results.rds")
+
+# Display cross-validation tuning results
+rank_results(tuning_results, rank_metric = "roc_auc", select_best = TRUE)
+autoplot(tuning_results) + theme_minimal()
+```
+
+
+**3. Fit final models and evaluate on test data**
+```{r fit model, eval=FALSE}
+# Helper function to finalize, fit on train_data, and evaluate on test_data
+evaluate_model <- function(model_id) {
+  best_params <- tuning_results %>%
+    extract_workflow_set_result(model_id) %>%
+    select_best(metric = "roc_auc")
+  
+  final_fit <- tuning_results %>%
+    extract_workflow(model_id) %>%
+    finalize_workflow(best_params) %>%
+    last_fit(data_split, metrics = metric_set(roc_auc, accuracy, sens, spec, f_meas))
+  
+  return(final_fit)
+}
+
+rf_final  <- evaluate_model("base_Random_Forest")
+xgb_final <- evaluate_model("base_XGBoost")
+
+rm(tuning_results, models_wf, cv_folds)
+gc()
+
+```
+```{r}
+# Compare Test Set Metrics side by side
+bind_rows(
+  collect_metrics(rf_final)  %>% mutate(Model = "Random Forest"),
+  collect_metrics(xgb_final) %>% mutate(Model = "XGBoost")
+) %>%
+  select(Model, .metric, .estimate) %>%
+  pivot_wider(names_from = .metric, values_from = .estimate) %>%
+  knitr::kable(
+    digits = 3,
+    col.names = c("Model", "Accuracy", "Sensitivity", "Specificity", "F1-Score", "ROC-AUC"),
+    caption = "Test Set Performance Comparison"
+  )
+```
+
+\
+
+**4. Results:** \
+
+Plot ROC Curves, Confusion Matrix & Feature Importance  
+
+```{r plot results}
+# 1. Compare ROC Curves on Test Data
+bind_rows(
+  collect_predictions(rf_final)  %>% mutate(Model = "Random Forest"),
+  collect_predictions(xgb_final) %>% mutate(Model = "XGBoost")
+) %>%
+  group_by(Model) %>%
+  roc_curve(truth = Potability, .pred_1, event_level = "second") %>%
+  autoplot() +
+  theme_minimal() +
+  labs(title = "ROC Curve Comparison: Random Forest vs. XGBoost")
+
+# 2. Confusion Matrix for Random Forest 
+rf_cm <- collect_predictions(rf_final) %>%
+  conf_mat(truth = Potability, estimate = .pred_class)
+
+rf_cm$table %>%
+  as.data.frame.matrix() %>%
+  tibble::rownames_to_column(var = "Prediction") %>%
+  mutate(Prediction = c("Predicted: Not Potable (0)", "Predicted: Potable (1)")) %>%
+  knitr::kable(
+    col.names = c("Prediction / Actual", "Actual: Not Potable (0)", "Actual: Potable (1)"),
+    align = c("l", "c", "c"),
+    caption = "Random Forest Confusion Matrix (Test Set, n = 656)"
+  )
+
+# 3. Feature Importance Plot
+rf_final %>%
+  extract_fit_engine() %>%
+  ranger::importance() %>%
+  enframe(name = "Variable", value = "Importance") %>%
+  ggplot(aes(x = reorder(Variable, Importance), y = Importance)) +
+  geom_col(fill = "#3D85C6", width = 0.7) +
+  coord_flip() +
+  theme_minimal() +
+  labs(
+    title = "Feature Importance (Random Forest)",
+    x = NULL,
+    y = "Impurity Importance"
+  )
+
+
+```
+
+### Results Analysis
+
+- Model Comparison: Random Forest outperformed XGBoost on both cross-validation (ROC-AUC = 0.689 vs. 0.687) and the unseen test set (ROC-AUC = 0.689 vs. 0.656)  
+
+- Key parameters: ph, Sulfate, Hardness, Solids, and Chloramines are the most influential variables for predicting potability.  
+
+- The model is conservative: it reliably catches 85.5% of unsafe water samples (342 / 400), but misclassifies 60.9% of genuinely potable samples (156 / 256) as unsafe. Although the false-negative rate is high, it represents the safer type of error. Safe water labeled "Not Potable" is unnecessarily re-treated—increasing operational and economic costs—without risking human health. Reducing false positives is far more critical, as clearing contaminated water poses a direct public health risk.
+
+## Recommendations
+
+- Use the Random Forest model (ROC-AUC = 0.689) as an initial automated filter to flag likely contaminated batches, while requiring confirmatory laboratory testing before clearing water for human consumption.  
+
+- Prioritize real-time sensor calibration and quality control on ph, Sulfate, Hardness, Solids, and Chloramines, as these five variables drive the strongest predictive signal and show significant variance differences between potable and non-potable samples.  
+
+- Address the high missingness rates in Sulfate (23.8%) and ph (15.0%) by improving sensor logging or sample recording procedures.  
+
+- Engineer binary indicator flags for WHO/EPA safe threshold violations to help tree models isolate safe chemical combinations more efficiently.  
+
+
+## Conclusion: 
+
+While the Random Forest model reliably identifies 85.5% of unsafe water samples, its 60.9% false-negative rate on potable samples and 14.5% false-positive rate on unsafe samples indicate that it is best suited as a conservative early-warning screening tool paired with threshold tuning and confirmatory lab testing.
+
+
+
