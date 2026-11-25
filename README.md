@@ -5,8 +5,8 @@ An end-to-end exploratory data analysis, statistical hypothesis testing, and mac
 #### 📄 Project Deliverables
 
 * **[Executive Summary (PDF)](./Executive-Summary.pdf)** — A concise 3-page visual brief highlighting key insights, model performance, and public health recommendations.
-* **[Full Technical Report (PDF)](./Water-Potability-Project.pdf)** — Complete R Markdown report including code, statistical diagnostics, visualizations, and model tuning.
-* **[Source Code (.Rmd)](./Water-Potability-Project.Rmd)** — Reproducible R Markdown analysis built with tidyverse and tidymodels.
+* **[Full Technical Report (PDF)](./Water_Potability_Project.pdf)** — Complete R Markdown report including code, statistical diagnostics, visualizations, and model tuning.
+* **[Source Code (.Rmd)](./Water_Potability_Project.Rmd)** — Reproducible R Markdown analysis built with tidyverse and tidymodels.
 
 
 #### 🔍 Key Findings & Methodology
